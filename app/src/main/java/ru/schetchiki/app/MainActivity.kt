@@ -1,20 +1,10 @@
 package ru.schetchiki.app
 
 
-import android.Manifest
-import android.app.Activity
-import android.app.PendingIntent
-import android.content.BroadcastReceiver
-import android.content.Context
 import android.content.Intent
-import android.content.IntentFilter
-import android.content.pm.PackageManager
 import android.os.Bundle
-import android.telephony.SmsManager
-import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.Image
@@ -41,7 +31,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.core.content.ContextCompat
 import kotlinx.coroutines.delay
 
 private val Orange = Color(0xFFB85A1C)
@@ -53,49 +42,33 @@ private val Muted = Color(0xFF9B9BA2)
 
 
 class MainActivity : ComponentActivity() {
-    companion object { const val ACTION_SMS_RESULT = "ru.schetchiki.app.SMS_RESULT" }
-    private var smsListener: ((String) -> Unit)? = null
-    private val smsResultReceiver = object : BroadcastReceiver() {
-        override fun onReceive(context: Context?, intent: Intent?) { smsListener?.invoke(intent?.getStringExtra("status") ?: "failed") }
-    }
-    private val permissionLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        if (granted) pendingSend?.invoke() else Toast.makeText(this, "Разрешение на SMS не предоставлено", Toast.LENGTH_LONG).show()
-        pendingSend = null
-    }
-    private var pendingSend: (() -> Unit)? = null
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        window.decorView.systemUiVisibility = (android.view.View.SYSTEM_UI_FLAG_FULLSCREEN or
-            android.view.View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or android.view.View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or
-            android.view.View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or android.view.View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION or
-            android.view.View.SYSTEM_UI_FLAG_LAYOUT_STABLE)
-        ContextCompat.registerReceiver(this, smsResultReceiver, IntentFilter(ACTION_SMS_RESULT), ContextCompat.RECEIVER_NOT_EXPORTED)
+        androidx.core.view.WindowCompat.setDecorFitsSystemWindows(window, false)
+        window.statusBarColor = android.graphics.Color.TRANSPARENT
+        val controller = androidx.core.view.WindowCompat.getInsetsController(window, window.decorView)
+        controller.isAppearanceLightStatusBars = false
+        controller.systemBarsBehavior = androidx.core.view.WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        controller.hide(androidx.core.view.WindowInsetsCompat.Type.navigationBars())
+        controller.show(androidx.core.view.WindowInsetsCompat.Type.statusBars())
         setContent {
             MaterialTheme(colorScheme = darkColorScheme(primary = OrangeLight, background = BgTop)) {
-                AppUI(
-                    onSendSms = { number, message, result ->
-                        smsListener = result
-                        val sendAction = {
-                            try {
-                                val pi = PendingIntent.getBroadcast(this, 0, Intent(this, SmsSentReceiver::class.java), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-                                val manager = getSystemService(SmsManager::class.java)
-                                manager.sendTextMessage(number, null, message, pi, null)
-                            } catch (e: Exception) {
-                                result("failed")
-                                Toast.makeText(this, "Не удалось отправить SMS: ${e.localizedMessage ?: "ошибка"}", Toast.LENGTH_LONG).show()
-                            }
-                        }
-                        if (ContextCompat.checkSelfPermission(this, Manifest.permission.SEND_SMS) == PackageManager.PERMISSION_GRANTED) sendAction()
-                        else { pendingSend = sendAction; permissionLauncher.launch(Manifest.permission.SEND_SMS) }
+                AppUI(onSendSms = { number, message, result ->
+                    try {
+                        val intent = Intent(Intent.ACTION_SENDTO, android.net.Uri.fromParts("smsto", number, null))
+                        intent.putExtra("sms_body", message)
+                        startActivity(intent)
+                        result("prepared")
+                    } catch (e: android.content.ActivityNotFoundException) {
+                        result("failed")
+                    } catch (e: SecurityException) {
+                        result("failed")
                     }
-                )
+                })
             }
         }
     }
-    override fun onDestroy() { unregisterReceiver(smsResultReceiver); super.onDestroy() }
 }
-
 
 @Composable
 private fun AppUI(onSendSms: (String, String, (String) -> Unit) -> Unit) {
@@ -108,7 +81,11 @@ private fun AppUI(onSendSms: (String, String, (String) -> Unit) -> Unit) {
     LaunchedEffect(Unit) { delay(1700); splash = false }
     Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(BgTop, Color(0xFF18191D), BgBottom)))) {
         if (splash) {
-            Image(painter = painterResource(R.drawable.splash_art), contentDescription = "Заставка СЧЕТЧИКИ", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+            Column(Modifier.fillMaxSize().statusBarsPadding(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                Image(painterResource(R.drawable.house_logo), "Логотип", Modifier.size(240.dp), contentScale = ContentScale.Fit)
+                Spacer(Modifier.height(24.dp))
+                Text("СЧЕТЧИКИ", color = OrangeLight, fontSize = 28.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
+            }
         } else {
             AnimatedVisibility(visible = page == 0) {
                 InputPage(labels, vals, onContinue = { page = 1 })
@@ -120,7 +97,7 @@ private fun AppUI(onSendSms: (String, String, (String) -> Unit) -> Unit) {
                     } else {
                         val msg = labels.zip(vals).joinToString("\n") { (k,v) -> "$k: ${v.trim()}" }
                         onSendSms(phone.trim(), msg) { status ->
-                            if (status == "sent") page = 2 else { sendError = "SMS не удалось отправить. Проверьте номер, сеть и баланс."; page = 3 }
+                            if (status == "prepared") page = 2 else { sendError = "Не удалось открыть приложение SMS. Проверьте, установлено ли оно."; page = 3 }
                         }
                     }
                 })
@@ -134,7 +111,8 @@ private fun AppUI(onSendSms: (String, String, (String) -> Unit) -> Unit) {
 
 @Composable
 private fun InputPage(labels: List<String>, values: MutableList<String>, onContinue: () -> Unit) {
-    Column(Modifier.fillMaxSize().imePadding().verticalScroll(rememberScrollState()).padding(horizontal = 22.dp, vertical = 20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+    Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().imePadding().padding(horizontal = 22.dp, vertical = 20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()), horizontalAlignment = Alignment.CenterHorizontally) {
         Spacer(Modifier.height(12.dp))
         Text("СЧЕТЧИКИ", color = OrangeLight, fontSize = 24.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
         Text("ВВОД ДАННЫХ", color = Muted, fontSize = 12.sp, letterSpacing = 2.sp)
@@ -151,6 +129,7 @@ private fun InputPage(labels: List<String>, values: MutableList<String>, onConti
                 )
             }
         }
+        }
         Spacer(Modifier.height(8.dp))
         OrangeButton("ПРОДОЛЖИТЬ", onContinue, Modifier.fillMaxWidth().height(54.dp))
     }
@@ -159,12 +138,14 @@ private fun InputPage(labels: List<String>, values: MutableList<String>, onConti
 
 @Composable
 private fun PhonePage(phone: String, onPhone: (String) -> Unit, onBack: () -> Unit, onSend: () -> Unit) {
-        Column(Modifier.fillMaxSize().imePadding().padding(22.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+    Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().imePadding().padding(22.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
         Text("СЧЕТЧИКИ", color = OrangeLight, fontSize = 24.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
         Spacer(Modifier.height(10.dp)); Text("ОТПРАВКА SMS", color = Muted, fontSize = 12.sp, letterSpacing = 2.sp)
         Spacer(Modifier.height(34.dp)); Text("Номер получателя", color = Color(0xFFE1E1E3), fontWeight = FontWeight.SemiBold, modifier = Modifier.fillMaxWidth())
         Spacer(Modifier.height(8.dp))
         OutlinedTextField(phone, onPhone, Modifier.fillMaxWidth(), singleLine = true, placeholder = { Text("+7XXXXXXXXXX", color = Color(0xFF737780)) }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone), shape = RoundedCornerShape(14.dp), colors = orangeFieldColors())
+        }
         Spacer(Modifier.height(24.dp)); OrangeButton("ОТПРАВИТЬ SMS", onSend, Modifier.fillMaxWidth().height(54.dp))
         Spacer(Modifier.height(14.dp)); OutlinedOrangeButton("НАЗАД", onBack, Modifier.fillMaxWidth().height(52.dp))
     }
@@ -173,23 +154,27 @@ private fun PhonePage(phone: String, onPhone: (String) -> Unit, onBack: () -> Un
 
 @Composable
 private fun SuccessPage(onDone: () -> Unit) {
-    Column(Modifier.fillMaxSize().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+    Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
         Box(Modifier.size(116.dp).border(2.dp, Orange, CircleShape).background(Color(0xFF201B17), CircleShape), contentAlignment = Alignment.Center) {
             Icon(Icons.Default.Check, contentDescription = "Успешно", tint = OrangeLight, modifier = Modifier.size(64.dp))
         }
-        Spacer(Modifier.height(26.dp)); Text("УСПЕШНО!", color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.height(8.dp)); Text("SMS отправлено", color = Muted, fontSize = 16.sp)
-        Spacer(Modifier.height(56.dp)); OrangeButton("ГОТОВО", onDone, Modifier.fillMaxWidth().height(54.dp))
+        Spacer(Modifier.height(26.dp)); Text("ГОТОВО К ОТПРАВКЕ", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(8.dp)); Text("SMS подготовлено к отправке", color = Muted, fontSize = 16.sp)
+        }
+        Spacer(Modifier.height(16.dp)); OrangeButton("ГОТОВО", onDone, Modifier.fillMaxWidth().height(54.dp))
     }
 }
 
 
 @Composable
 private fun ErrorPage(message: String, onRetry: () -> Unit, onBack: () -> Unit) {
-    Column(Modifier.fillMaxSize().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+    Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
         Text("ОШИБКА", color = OrangeLight, fontSize = 26.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(14.dp)); Text(message, color = Muted, textAlign = TextAlign.Center)
-        Spacer(Modifier.height(32.dp)); OrangeButton("ПОВТОРИТЬ", onRetry, Modifier.fillMaxWidth().height(54.dp))
+        }
+        Spacer(Modifier.height(16.dp)); OrangeButton("ПОВТОРИТЬ", onRetry, Modifier.fillMaxWidth().height(54.dp))
         Spacer(Modifier.height(12.dp)); OutlinedOrangeButton("НА ГЛАВНЫЙ", onBack, Modifier.fillMaxWidth().height(52.dp))
     }
 }
