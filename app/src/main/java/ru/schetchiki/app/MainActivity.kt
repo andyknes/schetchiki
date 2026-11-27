@@ -159,7 +159,7 @@ private fun InputPage(labels: List<String>, values: MutableList<String>, onConti
 
 @Composable
 private fun PhonePage(phone: String, onPhone: (String) -> Unit, onBack: () -> Unit, onSend: () -> Unit) {
-    Column(Modifier.fillMaxSize().imePadding().padding(22.dp), horizontalAlignment = Alignment.Center, verticalArrangement = Arrangement.Center) {
+        Column(Modifier.fillMaxSize().imePadding().padding(22.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
         Text("СЧЕТЧИКИ", color = OrangeLight, fontSize = 24.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
         Spacer(Modifier.height(10.dp)); Text("ОТПРАВКА SMS", color = Muted, fontSize = 12.sp, letterSpacing = 2.sp)
         Spacer(Modifier.height(34.dp)); Text("Номер получателя", color = Color(0xFFE1E1E3), fontWeight = FontWeight.SemiBold, modifier = Modifier.fillMaxWidth())
